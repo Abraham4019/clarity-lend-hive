@@ -2,7 +2,7 @@
 
 A decentralized peer-to-peer lending platform built on the Stacks blockchain. LendHive allows users to:
 
-- Create loan requests specifying amount, interest rate, and duration
+- Create loan requests specifying amount, interest rate, duration and collateral
 - Fund loan requests as a lender
 - Repay loans with interest
 - Track loan status and payment history
@@ -17,11 +17,12 @@ A decentralized peer-to-peer lending platform built on the Stacks blockchain. Le
 - Automated repayment validation
 - Smart liquidation system with collateral management
 - Duration-based loan monitoring
+- Minimum collateral ratio requirement (120%)
 
 ## Contract Functions
 
 The contract implements the core lending functionality including:
-- Creating loan requests
+- Creating loan requests with collateral validation
 - Funding loans
 - Processing repayments
 - Calculating interest
@@ -32,7 +33,8 @@ The contract implements the core lending functionality including:
 ## Security
 
 The contract includes various safety checks and requires collateral to protect lenders:
-- Mandatory collateral requirement
+- Mandatory minimum collateral ratio of 120%
+- Collateral validation on loan creation
 - Automated liquidation triggers
 - Secure fund transfers
 - Duration-based loan monitoring

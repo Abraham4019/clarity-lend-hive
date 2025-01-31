@@ -6,9 +6,11 @@
 (define-constant ERR-LOAN-NOT-FOUND (err u102))
 (define-constant ERR-LOAN-ALREADY-FUNDED (err u103))
 (define-constant ERR-INSUFFICIENT-FUNDS (err u104))
+(define-constant ERR-CANNOT-LIQUIDATE (err u105))
 
 ;; Data Variables
 (define-data-var loan-counter uint u0)
+(define-data-var liquidation-threshold uint u150) ;; 150% collateral requirement
 
 ;; Maps
 (define-map Loans
@@ -21,7 +23,8 @@
         duration: uint,
         status: (string-ascii 20),
         start-time: uint,
-        collateral: uint
+        collateral: uint,
+        last-check: uint
     }
 )
 
@@ -43,6 +46,19 @@
     (+ (get amount loan) interest-amount))
 )
 
+(define-private (check-liquidation-condition (loan-id uint))
+    (let (
+        (loan (unwrap! (map-get? Loans loan-id) ERR-LOAN-NOT-FOUND))
+        (current-time block-height)
+        (loan-duration (get duration loan))
+        (loan-start (get start-time loan))
+    )
+    (and
+        (is-eq (get status loan) "ACTIVE")
+        (>= current-time (+ loan-start loan-duration))
+    ))
+)
+
 ;; Public Functions
 (define-public (create-loan-request (amount uint) (interest-rate uint) (duration uint))
     (let
@@ -59,7 +75,8 @@
                     duration: duration,
                     status: "REQUESTED",
                     start-time: u0,
-                    collateral: amount
+                    collateral: amount,
+                    last-check: block-height
                 })
                 (var-set loan-counter (+ loan-id u1))
                 (ok loan-id)
@@ -78,8 +95,9 @@
             (try! (stx-transfer? (get amount loan) tx-sender (get borrower loan)))
             (map-set Loans loan-id (merge loan {
                 lender: (some tx-sender),
-                status: "ACTIVE",
-                start-time: block-height
+                status: "ACTIVE", 
+                start-time: block-height,
+                last-check: block-height
             }))
             (ok true)
         )
@@ -107,6 +125,25 @@
     ))
 )
 
+(define-public (liquidate-loan (loan-id uint))
+    (let (
+        (loan (unwrap! (map-get? Loans loan-id) ERR-LOAN-NOT-FOUND))
+    )
+    (if (and 
+            (check-liquidation-condition loan-id)
+            (is-some (get lender loan))
+        )
+        (begin
+            (try! (stx-transfer? (get collateral loan) (get borrower loan) (unwrap! (get lender loan) ERR-LOAN-NOT-FOUND)))
+            (map-set Loans loan-id (merge loan {
+                status: "LIQUIDATED"
+            }))
+            (ok true)
+        )
+        ERR-CANNOT-LIQUIDATE
+    ))
+)
+
 ;; Read-only functions
 (define-read-only (get-loan (loan-id uint))
     (map-get? Loans loan-id)
@@ -114,4 +151,8 @@
 
 (define-read-only (get-loan-count)
     (var-get loan-counter)
+)
+
+(define-read-only (can-be-liquidated (loan-id uint))
+    (check-liquidation-condition loan-id)
 )

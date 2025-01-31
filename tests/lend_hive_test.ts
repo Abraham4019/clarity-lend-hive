@@ -95,3 +95,56 @@ Clarinet.test({
         assertEquals(loan['status'], "COMPLETED");
     }
 });
+
+Clarinet.test({
+    name: "Can liquidate overdue loan",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+        const borrower = accounts.get('wallet_1')!;
+        const lender = accounts.get('wallet_2')!;
+        
+        // Create and fund loan
+        let block = chain.mineBlock([
+            Tx.contractCall('lend_hive', 'create-loan-request', [
+                types.uint(1000),
+                types.uint(10),
+                types.uint(10) // Short duration for testing
+            ], borrower.address),
+            Tx.contractCall('lend_hive', 'fund-loan', [
+                types.uint(0)
+            ], lender.address)
+        ]);
+        
+        // Advance blockchain past loan duration
+        chain.mineEmptyBlockUntil(20);
+        
+        // Check if loan can be liquidated
+        let canLiquidate = chain.callReadOnlyFn(
+            'lend_hive',
+            'can-be-liquidated',
+            [types.uint(0)],
+            lender.address
+        );
+        
+        canLiquidate.result.expectBool(true);
+        
+        // Liquidate loan
+        let liquidateBlock = chain.mineBlock([
+            Tx.contractCall('lend_hive', 'liquidate-loan', [
+                types.uint(0)
+            ], lender.address)
+        ]);
+        
+        liquidateBlock.receipts[0].result.expectOk().expectBool(true);
+        
+        // Verify loan is liquidated
+        let getLoan = chain.callReadOnlyFn(
+            'lend_hive',
+            'get-loan',
+            [types.uint(0)],
+            lender.address
+        );
+        
+        let loan = getLoan.result.expectSome().expectTuple();
+        assertEquals(loan['status'], "LIQUIDATED");
+    }
+});

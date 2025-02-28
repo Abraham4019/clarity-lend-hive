@@ -8,6 +8,13 @@
 (define-constant ERR-INSUFFICIENT-FUNDS (err u104))
 (define-constant ERR-CANNOT-LIQUIDATE (err u105))
 (define-constant ERR-INSUFFICIENT-COLLATERAL (err u106))
+(define-constant ERR-INVALID-STATUS-TRANSITION (err u107))
+
+;; Loan Status Constants
+(define-constant STATUS-REQUESTED "REQUESTED")
+(define-constant STATUS-ACTIVE "ACTIVE")
+(define-constant STATUS-REPAID "REPAID")
+(define-constant STATUS-LIQUIDATED "LIQUIDATED")
 
 ;; Data Variables
 (define-data-var loan-counter uint u0)
@@ -35,6 +42,15 @@
     (list 100 uint)
 )
 
+;; Events
+(define-private (emit-loan-created (loan-id uint) (borrower principal) (amount uint))
+    (print { type: "loan-created", loan-id: loan-id, borrower: borrower, amount: amount })
+)
+
+(define-private (emit-loan-funded (loan-id uint) (lender principal))
+    (print { type: "loan-funded", loan-id: loan-id, lender: lender })
+)
+
 ;; Private Functions
 (define-private (validate-loan-amount (amount uint))
     (> amount u0)
@@ -45,6 +61,14 @@
         (min-required (/ (* amount (var-get min-collateral-ratio)) u100))
     )
     (>= collateral min-required))
+)
+
+(define-private (validate-status-transition (current-status (string-ascii 20)) (new-status (string-ascii 20)))
+    (or
+        (and (is-eq current-status STATUS-REQUESTED) (is-eq new-status STATUS-ACTIVE))
+        (and (is-eq current-status STATUS-ACTIVE) (is-eq new-status STATUS-REPAID))
+        (and (is-eq current-status STATUS-ACTIVE) (is-eq new-status STATUS-LIQUIDATED))
+    )
 )
 
 (define-private (calculate-repayment-amount (loan-id uint))
@@ -63,7 +87,7 @@
         (loan-start (get start-time loan))
     )
     (and
-        (is-eq (get status loan) "ACTIVE")
+        (is-eq (get status loan) STATUS-ACTIVE)
         (>= current-time (+ loan-start loan-duration))
     ))
 )
@@ -85,12 +109,13 @@
                     amount: amount,
                     interest-rate: interest-rate,
                     duration: duration,
-                    status: "REQUESTED",
+                    status: STATUS-REQUESTED,
                     start-time: u0,
                     collateral: collateral,
                     last-check: block-height
                 })
                 (var-set loan-counter (+ loan-id u1))
+                (emit-loan-created loan-id tx-sender amount)
                 (ok loan-id)
             )
             ERR-INSUFFICIENT-COLLATERAL
@@ -98,4 +123,7 @@
     )
 )
 
-;; Rest of contract remains unchanged
+;; Read-only function to get loan details
+(define-read-only (get-loan (loan-id uint))
+    (map-get? Loans loan-id)
+)

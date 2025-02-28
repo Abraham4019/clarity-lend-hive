@@ -24,6 +24,9 @@ Clarinet.test({
         
         block.receipts[0].result.expectOk().expectUint(0);
         
+        // Verify event emission
+        assertEquals(block.receipts[0].events[0].type, "contract_event");
+        
         let getLoan = chain.callReadOnlyFn(
             'lend_hive',
             'get-loan',
@@ -55,5 +58,3 @@ Clarinet.test({
         block.receipts[0].result.expectErr().expectUint(106);
     }
 });
-
-// Rest of tests remain unchanged

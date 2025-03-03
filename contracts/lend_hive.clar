@@ -9,6 +9,7 @@
 (define-constant ERR-CANNOT-LIQUIDATE (err u105))
 (define-constant ERR-INSUFFICIENT-COLLATERAL (err u106))
 (define-constant ERR-INVALID-STATUS-TRANSITION (err u107))
+(define-constant ERR-INVALID-REPAYMENT (err u108))
 
 ;; Loan Status Constants
 (define-constant STATUS-REQUESTED "REQUESTED")
@@ -33,7 +34,8 @@
         status: (string-ascii 20),
         start-time: uint,
         collateral: uint,
-        last-check: uint
+        last-check: uint,
+        repaid-amount: uint
     }
 )
 
@@ -49,6 +51,10 @@
 
 (define-private (emit-loan-funded (loan-id uint) (lender principal))
     (print { type: "loan-funded", loan-id: loan-id, lender: lender })
+)
+
+(define-private (emit-loan-repayment (loan-id uint) (amount uint))
+    (print { type: "loan-repayment", loan-id: loan-id, amount: amount })
 )
 
 ;; Private Functions
@@ -79,19 +85,6 @@
     (+ (get amount loan) interest-amount))
 )
 
-(define-private (check-liquidation-condition (loan-id uint))
-    (let (
-        (loan (unwrap! (map-get? Loans loan-id) ERR-LOAN-NOT-FOUND))
-        (current-time block-height)
-        (loan-duration (get duration loan))
-        (loan-start (get start-time loan))
-    )
-    (and
-        (is-eq (get status loan) STATUS-ACTIVE)
-        (>= current-time (+ loan-start loan-duration))
-    ))
-)
-
 ;; Public Functions
 (define-public (create-loan-request (amount uint) (interest-rate uint) (duration uint) (collateral uint))
     (let
@@ -112,7 +105,8 @@
                     status: STATUS-REQUESTED,
                     start-time: u0,
                     collateral: collateral,
-                    last-check: block-height
+                    last-check: block-height,
+                    repaid-amount: u0
                 })
                 (var-set loan-counter (+ loan-id u1))
                 (emit-loan-created loan-id tx-sender amount)
@@ -123,7 +117,51 @@
     )
 )
 
+(define-public (fund-loan (loan-id uint))
+    (let (
+        (loan (unwrap! (map-get? Loans loan-id) ERR-LOAN-NOT-FOUND))
+    )
+    (asserts! (is-eq (get status loan) STATUS-REQUESTED) ERR-LOAN-ALREADY-FUNDED)
+    (asserts! (is-none (get lender loan)) ERR-LOAN-ALREADY-FUNDED)
+    
+    (map-set Loans loan-id
+        (merge loan {
+            lender: (some tx-sender),
+            status: STATUS-ACTIVE,
+            start-time: block-height
+        })
+    )
+    (emit-loan-funded loan-id tx-sender)
+    (ok true))
+)
+
+(define-public (repay-loan (loan-id uint) (amount uint))
+    (let (
+        (loan (unwrap! (map-get? Loans loan-id) ERR-LOAN-NOT-FOUND))
+        (total-due (calculate-repayment-amount loan-id))
+    )
+    (asserts! (is-eq (get status loan) STATUS-ACTIVE) ERR-INVALID-STATUS-TRANSITION)
+    (asserts! (is-eq (get borrower loan) tx-sender) ERR-NOT-AUTHORIZED)
+    
+    (let (
+        (new-repaid-amount (+ (get repaid-amount loan) amount))
+    )
+    (map-set Loans loan-id
+        (merge loan {
+            repaid-amount: new-repaid-amount,
+            status: (if (>= new-repaid-amount total-due) STATUS-REPAID STATUS-ACTIVE)
+        })
+    )
+    (emit-loan-repayment loan-id amount)
+    (ok true)))
+)
+
 ;; Read-only function to get loan details
 (define-read-only (get-loan (loan-id uint))
     (map-get? Loans loan-id)
+)
+
+;; Read-only function to get total repayment amount
+(define-read-only (get-total-repayment-amount (loan-id uint))
+    (ok (calculate-repayment-amount loan-id))
 )
